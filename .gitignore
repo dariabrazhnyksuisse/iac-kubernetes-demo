@@ -1,0 +1,14 @@
+# editors
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+
+# logs & envs
+*.log
+.env
+.env.*
+# kubectl local files
+*.kubeconfig
