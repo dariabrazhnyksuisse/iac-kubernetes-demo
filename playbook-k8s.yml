@@ -1,0 +1,102 @@
+# playbook-k8s.yml
+# -----------------------------------------------------------------------------
+# Goal: Automate the deployment of our Kubernetes demo (hello/todo app)
+# + Optional monitoring stack (Grafana + Prometheus)
+# + Optional GitOps integration (Argo CD)
+# -----------------------------------------------------------------------------
+
+- name: Apply K8s manifests for the demo
+  hosts: localhost                # run on this local machine
+  connection: local               # prevent SSH (run commands directly)
+  gather_facts: false             # skip collecting system facts (faster)
+  collections:
+    - kubernetes.core             # main collection for k8s modules
+    - community.kubernetes        # adds Helm and advanced features
+
+  vars:
+    kube_namespace: demo          # main namespace for the demo
+    replicas: 2                   # number of pods for scaling demo
+
+  tasks:
+
+  # ---------------------------------------------------------------------------
+  # 🧩 CORE DEPLOYMENT PART
+  # ---------------------------------------------------------------------------
+
+    - name: Ensure demo namespace exists
+      kubernetes.core.k8s:
+        state: present            # create if missing
+        kind: Namespace
+        name: "{{ kube_namespace }}"
+
+    - name: Apply Deployment and Service manifests
+      kubernetes.core.k8s:
+        state: present
+        namespace: "{{ kube_namespace }}"
+        src: "{{ item }}"         # loop through local YAML files
+      loop:
+        - deployment.yaml
+        - service.yaml
+
+    - name: Scale demo deployment
+      kubernetes.core.k8s_scale:
+        kind: Deployment
+        name: hello-deploy
+        namespace: "{{ kube_namespace }}"
+        replicas: "{{ replicas }}"
+
+
+  # ---------------------------------------------------------------------------
+  # 📊 OPTIONAL MONITORING STACK — Grafana + Prometheus
+  # ---------------------------------------------------------------------------
+  # This section installs the kube-prometheus-stack Helm chart into
+  # namespace 'monitoring', providing:
+  #   - Prometheus for metrics collection
+  #   - Grafana for dashboards (port-forward to localhost:3000)
+  #   - Alertmanager (optional)
+  #
+  # Comment out this entire block if you need a faster run.
+
+    - name: Ensure monitoring namespace exists
+      kubernetes.core.k8s:
+        state: present
+        kind: Namespace
+        name: monitoring
+
+    - name: Add Prometheus Helm repo
+      community.kubernetes.helm_repository:
+        name: prometheus-community
+        repo_url: https://prometheus-community.github.io/helm-charts
+
+    - name: Install kube-prometheus-stack (Grafana + Prometheus)
+      community.kubernetes.helm:
+        name: kps
+        chart_ref: prometheus-community/kube-prometheus-stack
+        release_namespace: monitoring
+        create_namespace: false
+        wait: true
+        values:
+          grafana:
+            adminUser: "admin"
+            adminPassword: "admin"   # DEMO ONLY; change in production
+
+  # ---------------------------------------------------------------------------
+  # 🔄 OPTIONAL GITOPS PART — Argo CD
+  # ---------------------------------------------------------------------------
+  # Argo CD continuously syncs Kubernetes manifests from your Git repo
+  # so that every change in Git triggers an automatic cluster update.
+
+    - name: Ensure argocd namespace exists
+      kubernetes.core.k8s:
+        state: present
+        kind: Namespace
+        name: argocd
+
+    - name: Install Argo CD official manifests
+      kubernetes.core.k8s:
+        state: present
+        namespace: argocd
+        definition: "{{ lookup('url', 'https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml') }}"
+
+  # End of playbook
+  # ---------------------------------------------------------------------------
